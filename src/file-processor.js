@@ -57,9 +57,8 @@ async function ensureDirectChildPages(markdown, fileDir, parentPageId) {
 }
 
 // Função para processar um arquivo README.md
-async function processReadmeFile(filePath, parentPageId) {
+async function processReadmeFile(filePath, parentPageId, pageName) {
   try {
-    const pageName = path.dirname(filePath);
     const { blocks } = await processMarkdownFile(filePath, parentPageId);
 
     // Se já existe uma página para este diretório
@@ -67,19 +66,38 @@ async function processReadmeFile(filePath, parentPageId) {
       const pageInfo = pageIdMap.get(pageName);
       // Se foi criada como referência (vazia), popular com o conteúdo
       if (pageInfo.isReference) {
-        await appendBlocks(pageInfo.id, blocks);
+        let i = 0;
+        while (i < blocks.length) {
+          const batch = blocks.slice(i, i + 100);
+          await appendBlocks(pageInfo.id, batch);
+          i += 100;
+        }
         pageIdMap.set(pageName, { id: pageInfo.id, isReference: false });
         return pageInfo.id;
       } else {
-        await appendBlocks(pageInfo.id, blocks);
+        let i = 0;
+        while (i < blocks.length) {
+          const batch = blocks.slice(i, i + 100);
+          await appendBlocks(pageInfo.id, batch);
+          i += 100;
+        }
         return pageInfo.id;
       }
     }
 
     // Criar uma nova página com o conteúdo do README
-    const page = await createPage(parentPageId, pageName, blocks);
+    const firstBatch = blocks.slice(0, 100);
+    const page = await createPage(parentPageId, pageName, firstBatch);
     pageIdMap.set(pageName, { id: page.id, isReference: false });
     console.log(`Página criada para README: ${pageName} (ID: ${page.id})`);
+
+    // Adicionar blocos restantes, se houver
+    let i = 100;
+    while (i < blocks.length) {
+      const batch = blocks.slice(i, i + 100);
+      await appendBlocks(page.id, batch);
+      i += 100;
+    }
     return page.id;
   } catch (error) {
     console.error(`Erro ao processar README ${filePath}:`, error.message);
@@ -191,7 +209,7 @@ async function processDirectory(dirPath) {
 
     // 1. Analisar README e criar páginas para filhos diretos referenciados
     if (readmePath) {
-      await processReadmeFile(readmePath, infoDir.id);
+      await processReadmeFile(readmePath, infoDir.id, dirName);
     }
 
     // 4. Listar subdiretórios e processar recursivamente
