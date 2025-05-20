@@ -23,6 +23,12 @@ marked.use(
   mangle()
 );
 
+// Adicionar referência ao pageIdMap (será setado pelo file-processor)
+let pageIdMap = null;
+function setPageIdMap(map) {
+  pageIdMap = map;
+}
+
 // Função para extrair o frontmatter do markdown
 function extractFrontmatter(content) {
   const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
@@ -67,15 +73,15 @@ function headingToNotionBlock(token) {
 }
 
 // Converter um token do tipo paragraph para um bloco de parágrafo do Notion
-function paragraphToNotionBlock(token) {
+function paragraphToNotionBlock(token, fileDir = "", rootDir = "") {
   const $ = cheerio.load(token.text);
+  const blocks = [];
   const richText = [];
 
   function processNode(node) {
     if (node.type === "text") {
       const content = node.data;
       if (content.trim() === "") return;
-
       richText.push({
         type: "text",
         text: {
@@ -85,8 +91,6 @@ function paragraphToNotionBlock(token) {
     } else if (node.type === "tag") {
       let annotations = {};
       let text = "";
-
-      // Processar todos os nós filhos para obter o texto
       $(node)
         .contents()
         .each((_, child) => {
@@ -96,10 +100,7 @@ function paragraphToNotionBlock(token) {
             text += $(child).text();
           }
         });
-
       if (text.trim() === "") return;
-
-      // Aplicar anotações com base na tag
       switch (node.name) {
         case "strong":
         case "b":
@@ -119,19 +120,40 @@ function paragraphToNotionBlock(token) {
         case "code":
           annotations.code = true;
           break;
-        case "a":
+        case "a": {
+          const href = $(node).attr("href") || "";
+          // Verificar se é link interno para .md
+          if (href.endsWith(".md") && pageIdMap) {
+            // Resolver caminho absoluto do destino
+            const resolved = path.resolve(fileDir, href);
+            // Tentar encontrar o id da página
+            const pageId = pageIdMap.get(resolved);
+            if (pageId) {
+              // Adicionar bloco link_to_page
+              blocks.push({
+                object: "block",
+                type: "link_to_page",
+                link_to_page: {
+                  type: "page_id",
+                  page_id: pageId,
+                },
+              });
+              return;
+            }
+          }
+          // Se não for link interno, adicionar como rich_text normal
           richText.push({
             type: "text",
             text: {
               content: text,
               link: {
-                url: $(node).attr("href") || "",
+                url: href,
               },
             },
           });
           return;
+        }
       }
-
       richText.push({
         type: "text",
         text: {
@@ -147,6 +169,22 @@ function paragraphToNotionBlock(token) {
     .each((_, node) => {
       processNode(node);
     });
+
+  if (blocks.length > 0) {
+    // Se houver blocos link_to_page, retornar todos (um para cada link)
+    return blocks.concat([
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text:
+            richText.length > 0
+              ? richText
+              : [{ type: "text", text: { content: "" } }],
+        },
+      },
+    ]);
+  }
 
   return {
     object: "block",
@@ -428,7 +466,7 @@ function filterValidBlocks(blocks) {
 }
 
 // Função principal para converter Markdown em blocos do Notion
-function markdownToNotionBlocks(markdown) {
+function markdownToNotionBlocks(markdown, fileDir = "", rootDir = "") {
   const { frontmatter, content } = extractFrontmatter(markdown);
   const blocks = [];
 
@@ -496,7 +534,7 @@ function markdownToNotionBlocks(markdown) {
         block = headingToNotionBlock(token);
         break;
       case "paragraph":
-        block = paragraphToNotionBlock(token);
+        block = paragraphToNotionBlock(token, fileDir, rootDir);
         break;
       case "list":
         block = listToNotionBlocks(token);
@@ -543,10 +581,10 @@ function markdownToNotionBlocks(markdown) {
 }
 
 // Função para processar um arquivo Markdown
-function processMarkdownFile(filePath) {
+function processMarkdownFile(filePath, fileDir = "") {
   try {
     const content = fs.readFileSync(filePath, "utf8");
-    return markdownToNotionBlocks(content);
+    return markdownToNotionBlocks(content, fileDir, "");
   } catch (error) {
     console.error(
       `Erro ao processar arquivo Markdown ${filePath}:`,
@@ -560,4 +598,5 @@ module.exports = {
   markdownToNotionBlocks,
   processMarkdownFile,
   extractFrontmatter,
+  setPageIdMap,
 };

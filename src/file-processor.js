@@ -1,11 +1,14 @@
 const fs = require("fs");
 const path = require("path");
-const { processMarkdownFile } = require("./markdown-processor");
+const { processMarkdownFile, setPageIdMap } = require("./markdown-processor");
 const { createPage, appendBlocks } = require("./notion-client");
 const config = require("./config");
 
 // Mapear IDs de páginas criadas para evitar duplicações
-const pageIdMap = new Map();
+const pageIdMap = new Map(); // Map: caminho absoluto -> { id, isReference }
+
+// Setar o pageIdMap globalmente para o parser
+setPageIdMap(pageIdMap);
 
 // Função para verificar se um arquivo deve ser processado
 function shouldProcessFile(filePath) {
@@ -13,20 +16,60 @@ function shouldProcessFile(filePath) {
   return config.allowedExtensions.includes(ext);
 }
 
+// Função utilitária para garantir que todas as páginas referenciadas por links internos já existem
+const linkRegex = /[^!\(]\[([^\]]+)\]\((\.?\/?[^)]+\.md)\)/g;
+
+async function ensureInternalPages(markdown, fileDir, parentPageId) {
+  let match;
+  let found = false;
+  while ((match = linkRegex.exec(markdown)) !== null) {
+    // match[0] é o trecho completo, match[1] é o nome, match[2] é o href
+    const nome = match[1];
+    const href = match[2];
+    found = true;
+    console.log(
+      `[DEBUG] Link interno encontrado: match='${match[0]}', nome='${nome}', href='${href}' (em ${fileDir})`
+    );
+    const resolved = path.resolve(fileDir, href);
+    if (!pageIdMap.has(resolved)) {
+      // Cria página vazia (só com título)
+      const page = await createPage(parentPageId, nome);
+      pageIdMap.set(resolved, { id: page.id, isReference: true });
+    }
+  }
+  if (!found) {
+    console.log(
+      "[DEBUG] Nenhum link interno do tipo [Nome](./arquivo.md) encontrado neste arquivo."
+    );
+  }
+}
+
 // Função para processar um arquivo README.md
 async function processReadmeFile(filePath, parentPageId, pageName) {
   try {
-    const { blocks } = processMarkdownFile(filePath);
+    // Pré-processar: garantir que todas as páginas referenciadas por links internos já existem
+    const rawContent = fs.readFileSync(filePath, "utf8");
+    await ensureInternalPages(rawContent, path.dirname(filePath), parentPageId);
 
-    // Se já existe uma página para este diretório, apenas adicionar os blocos
+    const { blocks } = processMarkdownFile(filePath, path.dirname(filePath));
+
+    // Se já existe uma página para este diretório
     if (pageIdMap.has(pageName)) {
-      await appendBlocks(pageIdMap.get(pageName), blocks);
-      return pageIdMap.get(pageName);
+      const pageInfo = pageIdMap.get(pageName);
+      // Se foi criada como referência (vazia), popular com o conteúdo
+      if (pageInfo.isReference) {
+        await appendBlocks(pageInfo.id, blocks);
+        pageIdMap.set(pageName, { id: pageInfo.id, isReference: false });
+        return pageInfo.id;
+      } else {
+        await appendBlocks(pageInfo.id, blocks);
+        return pageInfo.id;
+      }
     }
 
     // Criar uma nova página com o conteúdo do README
     const page = await createPage(parentPageId, pageName, blocks);
-    pageIdMap.set(pageName, page.id);
+    pageIdMap.set(pageName, { id: page.id, isReference: false });
     console.log(`Página criada para README: ${pageName} (ID: ${page.id})`);
     return page.id;
   } catch (error) {
@@ -40,13 +83,39 @@ async function processMarkdownFileToNotion(filePath, parentPageId) {
   try {
     const fileName = path.basename(filePath, path.extname(filePath));
 
-    // Se já existe uma página para este arquivo, pular
+    // Se já existe uma página para este arquivo
     if (pageIdMap.has(filePath)) {
-      console.log(`Página já existe para: ${fileName}`);
-      return pageIdMap.get(filePath);
+      const pageInfo = pageIdMap.get(filePath);
+      // Se foi criada como referência (vazia), popular com o conteúdo
+      if (pageInfo.isReference) {
+        const { blocks } = processMarkdownFile(
+          filePath,
+          path.dirname(filePath)
+        );
+        const validBlocks = blocks.filter((b) => b && typeof b === "object");
+        // Adicionar blocos em lotes de até 100
+        let i = 0;
+        while (i < validBlocks.length) {
+          const batch = validBlocks.slice(i, i + 100);
+          await appendBlocks(pageInfo.id, batch);
+          i += 100;
+        }
+        pageIdMap.set(filePath, { id: pageInfo.id, isReference: false });
+        console.log(
+          `Página de referência populada: ${fileName} (ID: ${pageInfo.id})`
+        );
+        return pageInfo.id;
+      } else {
+        console.log(`Página já existe para: ${fileName}`);
+        return pageInfo.id;
+      }
     }
 
-    const { blocks } = processMarkdownFile(filePath);
+    // Pré-processar: garantir que todas as páginas referenciadas por links internos já existem
+    const rawContent = fs.readFileSync(filePath, "utf8");
+    await ensureInternalPages(rawContent, path.dirname(filePath), parentPageId);
+
+    const { blocks } = processMarkdownFile(filePath, path.dirname(filePath));
     // Filtrar blocos inválidos
     const validBlocks = blocks.filter((b) => b && typeof b === "object");
     // Logar blocos para debug
@@ -67,7 +136,7 @@ async function processMarkdownFileToNotion(filePath, parentPageId) {
     // Dividir os blocos em lotes de até 100
     const firstBatch = validBlocks.slice(0, 100);
     const page = await createPage(parentPageId, fileName, firstBatch);
-    pageIdMap.set(filePath, page.id);
+    pageIdMap.set(filePath, { id: page.id, isReference: false });
     console.log(`Página criada para: ${fileName} (ID: ${page.id})`);
 
     // Adicionar blocos restantes, se houver
