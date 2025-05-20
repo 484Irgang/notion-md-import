@@ -1,0 +1,39 @@
+{
+    "name": "notion-md-import",
+    "version": "1.0.0",
+    "description": "Serviço para transformar arquivos Markdown em páginas do Notion",
+    "main": "src/index.js",
+    "scripts": {
+        "start": "node src/index.js",
+        "dev": "nodemon src/index.js",
+        "import": "node scripts/import.js"
+    },
+    "keywords": [
+        "notion",
+        "markdown",
+        "documentation"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "@notionhq/client": "^2.2.13",
+        "dotenv": "^16.3.1",
+        "marked": "^9.1.5",
+        "marked-gfm-heading-id": "^3.1.0",
+        "marked-mangle": "^1.1.4",
+        "marked-highlight": "^2.0.6",
+        "highlight.js": "^11.9.0",
+        "cheerio": "^1.0.0-rc.12",
+        "mermaid": "^10.6.1",
+        "turndown": "^7.1.2",
+        "yaml": "^2.3.4",
+        "commander": "^11.1.0",
+        "cli-progress": "^3.12.0",
+        "ora": "^5.4.1",
+        "chalk": "^4.1.2",
+        "inquirer": "^8.2.6"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.1"
+    }
+}
