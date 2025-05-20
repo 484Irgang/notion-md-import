@@ -73,7 +73,7 @@ function headingToNotionBlock(token) {
 }
 
 // Converter um token do tipo paragraph para um bloco de parágrafo do Notion
-function paragraphToNotionBlock(token, fileDir = "", rootDir = "") {
+function paragraphToNotionBlock(token, fileDir = "") {
   const $ = cheerio.load(token.text);
   const blocks = [];
   const richText = [];
@@ -122,36 +122,57 @@ function paragraphToNotionBlock(token, fileDir = "", rootDir = "") {
           break;
         case "a": {
           const href = $(node).attr("href") || "";
-          // Verificar se é link interno para .md
           if (href.endsWith(".md") && pageIdMap) {
-            // Resolver caminho absoluto do destino
+            // Link interno
             const resolved = path.resolve(fileDir, href);
-            // Tentar encontrar o id da página
-            const pageId = pageIdMap.get(resolved);
-            if (pageId) {
-              // Adicionar bloco link_to_page
+            const pageInfo = pageIdMap.get(resolved);
+            if (pageInfo && pageInfo.id) {
+              // Bloco de link_to_page
               blocks.push({
                 object: "block",
                 type: "link_to_page",
                 link_to_page: {
                   type: "page_id",
-                  page_id: pageId,
+                  page_id: pageInfo.id,
                 },
               });
               return;
+            } else {
+              // Se não encontrou, apenas texto
+              richText.push({
+                type: "text",
+                text: {
+                  content: text,
+                },
+                annotations,
+              });
+              return;
             }
-          }
-          // Se não for link interno, adicionar como rich_text normal
-          richText.push({
-            type: "text",
-            text: {
-              content: text,
-              link: {
-                url: href,
+          } else if (
+            href.startsWith("http://") ||
+            href.startsWith("https://")
+          ) {
+            // Link externo
+            richText.push({
+              type: "text",
+              text: {
+                content: text,
+                link: { url: href },
               },
-            },
-          });
-          return;
+              annotations,
+            });
+            return;
+          } else {
+            // Outro tipo de link
+            richText.push({
+              type: "text",
+              text: {
+                content: text,
+              },
+              annotations,
+            });
+            return;
+          }
         }
       }
       richText.push({
@@ -458,7 +479,10 @@ function filterValidBlocks(blocks) {
     .filter((b) => b && typeof b === "object")
     .map((b) => {
       // Se for um bloco de lista, pode conter children
-      if (b.hasOwnProperty("children") && Array.isArray(b.children)) {
+      if (
+        Object.prototype.hasOwnProperty.call(b, "children") &&
+        Array.isArray(b.children)
+      ) {
         b.children = filterValidBlocks(b.children);
       }
       return b;

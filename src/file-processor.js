@@ -16,25 +16,37 @@ function shouldProcessFile(filePath) {
   return config.allowedExtensions.includes(ext);
 }
 
-// Função utilitária para garantir que todas as páginas referenciadas por links internos já existem
-const linkRegex = /[^!\(]\[([^\]]+)\]\((\.?\/?[^)]+\.md)\)/g;
+// Função utilitária para verificar se um link é filho direto do diretório atual
+function isDirectChildLink(currentDir, linkPath) {
+  const resolved = path.resolve(currentDir, linkPath);
+  const rel = path.relative(currentDir, resolved);
+  if (rel.startsWith("..")) return false; // está fora do diretório
+  const parts = rel.split(path.sep);
+  return (
+    parts.length === 1 ||
+    (parts.length === 2 && parts[1].toLowerCase() === "readme.md")
+  );
+}
 
-async function ensureInternalPages(markdown, fileDir, parentPageId) {
+// Função utilitária para garantir que todas as páginas referenciadas por links internos já existem (apenas filhos diretos)
+const linkRegex = /^\[([^\]]+)\]\((\.?\/?[^)]+\.md)\)/g;
+
+async function ensureDirectChildPages(markdown, fileDir, parentPageId) {
   let match;
   let found = false;
   while ((match = linkRegex.exec(markdown)) !== null) {
-    // match[0] é o trecho completo, match[1] é o nome, match[2] é o href
     const nome = match[1];
     const href = match[2];
     found = true;
-    console.log(
-      `[DEBUG] Link interno encontrado: match='${match[0]}', nome='${nome}', href='${href}' (em ${fileDir})`
-    );
-    const resolved = path.resolve(fileDir, href);
-    if (!pageIdMap.has(resolved)) {
-      // Cria página vazia (só com título)
-      const page = await createPage(parentPageId, nome);
-      pageIdMap.set(resolved, { id: page.id, isReference: true });
+    if (isDirectChildLink(fileDir, href)) {
+      const resolved = path.resolve(fileDir, href);
+      if (!pageIdMap.has(resolved)) {
+        const page = await createPage(parentPageId, nome);
+        pageIdMap.set(resolved, { id: page.id, isReference: true });
+        console.log(
+          `[DEBUG] Página criada para filho direto: ${nome} (${resolved})`
+        );
+      }
     }
   }
   if (!found) {
@@ -47,10 +59,6 @@ async function ensureInternalPages(markdown, fileDir, parentPageId) {
 // Função para processar um arquivo README.md
 async function processReadmeFile(filePath, parentPageId, pageName) {
   try {
-    // Pré-processar: garantir que todas as páginas referenciadas por links internos já existem
-    const rawContent = fs.readFileSync(filePath, "utf8");
-    await ensureInternalPages(rawContent, path.dirname(filePath), parentPageId);
-
     const { blocks } = processMarkdownFile(filePath, path.dirname(filePath));
 
     // Se já existe uma página para este diretório
@@ -113,7 +121,11 @@ async function processMarkdownFileToNotion(filePath, parentPageId) {
 
     // Pré-processar: garantir que todas as páginas referenciadas por links internos já existem
     const rawContent = fs.readFileSync(filePath, "utf8");
-    await ensureInternalPages(rawContent, path.dirname(filePath), parentPageId);
+    await ensureDirectChildPages(
+      rawContent,
+      path.dirname(filePath),
+      parentPageId
+    );
 
     const { blocks } = processMarkdownFile(filePath, path.dirname(filePath));
     // Filtrar blocos inválidos
@@ -155,60 +167,49 @@ async function processMarkdownFileToNotion(filePath, parentPageId) {
 }
 
 // Função para processar um diretório
-async function processDirectory(dirPath, parentPageId) {
+async function processDirectory(dirPath) {
   try {
     const dirName = path.basename(dirPath);
-    let currentPageId = parentPageId;
+    const infoDir = pageIdMap.get(dirName);
+    if (!infoDir?.id)
+      throw new Error(
+        `Diretório não encontrado entre páginas criadas: ${dirPath}`
+      );
     let readmePath = null;
 
-    // Primeiro, verificar se existe um README.md no diretório
+    // Verificar se existe um README.md no diretório
     const readmeFile = path.join(dirPath, "README.md");
     if (fs.existsSync(readmeFile)) {
       readmePath = readmeFile;
     }
 
-    // Se não existe um README mas devemos criar páginas vazias para diretórios
-    if (!readmePath && config.createEmptyParentPages) {
-      const page = await createPage(parentPageId, dirName);
-      pageIdMap.set(dirPath, page.id);
-      currentPageId = page.id;
-      console.log(
-        `Página vazia criada para diretório: ${dirName} (ID: ${page.id})`
-      );
-    }
-
-    // Processar o README primeiro se existir
+    // 1. Analisar README e criar páginas para filhos diretos referenciados
     if (readmePath) {
-      currentPageId = await processReadmeFile(
-        readmePath,
-        parentPageId,
-        dirName
-      );
-      pageIdMap.set(dirPath, currentPageId);
+      const rawContent = fs.readFileSync(readmePath, "utf8");
+      await ensureDirectChildPages(rawContent, dirPath, infoDir.id);
+      await processReadmeFile(readmePath, infoDir.id, dirName);
     }
 
-    // Ler todos os arquivos e diretórios no diretório atual
+    // 4. Listar subdiretórios e processar recursivamente
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-
-    // Processar diretórios primeiro
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const entryPath = path.join(dirPath, entry.name);
-        await processDirectory(entryPath, currentPageId);
+        await processDirectory(entryPath, infoDir.id);
       }
     }
 
-    // Processar arquivos depois (exceto README.md que já foi processado)
+    // 5. Processar arquivos Markdown (exceto README.md)
     for (const entry of entries) {
       if (entry.isFile() && entry.name.toLowerCase() !== "readme.md") {
         const entryPath = path.join(dirPath, entry.name);
         if (shouldProcessFile(entryPath)) {
-          await processMarkdownFileToNotion(entryPath, currentPageId);
+          await processMarkdownFileToNotion(entryPath, infoDir.id);
         }
       }
     }
 
-    return currentPageId;
+    return infoDir.id;
   } catch (error) {
     console.error(`Erro ao processar diretório ${dirPath}:`, error.message);
     throw error;
@@ -226,8 +227,10 @@ async function processFiles(rootPath, rootPageId) {
       throw new Error(`Diretório não encontrado: ${rootPath}`);
     }
 
-    // Iniciar processamento a partir do diretório raiz
-    await processDirectory(rootPath, rootPageId);
+    // Iniciar processamento a partir do diretório raiz, marcando isRoot = true
+    const dirName = path.basename(rootPath);
+    pageIdMap.set(dirName, { id: rootPageId, isReference: false });
+    await processDirectory(rootPath);
 
     console.log("Processamento concluído com sucesso!");
     return true;
