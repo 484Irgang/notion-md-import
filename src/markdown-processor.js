@@ -8,6 +8,7 @@ const yaml = require("yaml");
 const fs = require("fs");
 const path = require("path");
 const config = require("./config");
+const { createPage } = require("./notion-client");
 
 // Configurar o marked com os plugins necessários
 marked.use(
@@ -50,6 +51,70 @@ function extractFrontmatter(content) {
   return { frontmatter: {}, content };
 }
 
+function returnBaseDir(currentDir, linkPath) {
+  const resolved = path.resolve(currentDir, linkPath);
+  const rel = path.relative(currentDir, resolved);
+  if (rel.startsWith("..")) return null; // está fora do diretório
+  const parts = rel.split(path.sep);
+  return parts.length === 1
+    ? path.basename(rel)
+    : parts.length === 2 && parts[1].toLowerCase() === "readme.md"
+    ? path.basename(path.dirname(rel))
+    : null;
+}
+
+// Função utilitária para processar texto e links internos
+async function processTextWithLinks(text, dirName, parentPageId) {
+  const linkRegex = /\[([^\]]+)\]\((\.?\/?[^)]+\.md)\)/g;
+  let match;
+  let lastIndex = 0;
+  const richText = [];
+  const blocks = [];
+
+  while ((match = linkRegex.exec(text)) !== null) {
+    // Texto antes do link
+    if (match.index > lastIndex) {
+      richText.push({
+        type: "text",
+        text: { content: text.slice(lastIndex, match.index) },
+      });
+    }
+    const name = match[1];
+    const href = match[2];
+
+    const baseDir = returnBaseDir(dirName, href);
+
+    // Garante que a página existe
+    if (!pageIdMap.has(baseDir)) {
+      const page = await createPage(parentPageId, name);
+      pageIdMap.set(baseDir, { id: page.id, isReference: true });
+    }
+    const pageInfo = pageIdMap.get(baseDir);
+
+    // Cria bloco de link_to_page
+    blocks.push({
+      object: "block",
+      type: "link_to_page",
+      link_to_page: {
+        type: "page_id",
+        page_id: pageInfo.id,
+      },
+    });
+
+    lastIndex = linkRegex.lastIndex;
+  }
+
+  // Texto restante
+  if (lastIndex < text.length) {
+    richText.push({
+      type: "text",
+      text: { content: text.slice(lastIndex) },
+    });
+  }
+
+  return { richText, blocks };
+}
+
 // Converter um token do tipo heading para um bloco de título do Notion
 function headingToNotionBlock(token) {
   // O Notion só suporta heading_1, heading_2 e heading_3
@@ -72,124 +137,69 @@ function headingToNotionBlock(token) {
   };
 }
 
-// Converter um token do tipo paragraph para um bloco de parágrafo do Notion
-function paragraphToNotionBlock(token, fileDir = "") {
+// Converter um token do tipo parágrafo para um bloco de parágrafo do Notion
+async function paragraphToNotionBlock(token, fileDir = "", parentPageId) {
   const $ = cheerio.load(token.text);
   const blocks = [];
-  const richText = [];
+  let richText = [];
 
-  function processNode(node) {
-    if (node.type === "text") {
-      const content = node.data;
-      if (content.trim() === "") return;
-      richText.push({
-        type: "text",
-        text: {
-          content,
-        },
-      });
-    } else if (node.type === "tag") {
-      let annotations = {};
-      let text = "";
-      $(node)
-        .contents()
-        .each((_, child) => {
-          if (child.type === "text") {
-            text += child.data;
-          } else if (child.type === "tag") {
-            text += $(child).text();
-          }
-        });
-      if (text.trim() === "") return;
-      switch (node.name) {
-        case "strong":
-        case "b":
-          annotations.bold = true;
-          break;
-        case "em":
-        case "i":
-          annotations.italic = true;
-          break;
-        case "u":
-          annotations.underline = true;
-          break;
-        case "s":
-        case "del":
-          annotations.strikethrough = true;
-          break;
-        case "code":
-          annotations.code = true;
-          break;
-        case "a": {
-          const href = $(node).attr("href") || "";
-          if (href.endsWith(".md") && pageIdMap) {
-            // Link interno
-            const resolved = path.resolve(fileDir, href);
-            const pageInfo = pageIdMap.get(resolved);
-            if (pageInfo && pageInfo.id) {
-              // Bloco de link_to_page
-              blocks.push({
-                object: "block",
-                type: "link_to_page",
-                link_to_page: {
-                  type: "page_id",
-                  page_id: pageInfo.id,
-                },
-              });
-              return;
-            } else {
-              // Se não encontrou, apenas texto
-              richText.push({
-                type: "text",
-                text: {
-                  content: text,
-                },
-                annotations,
-              });
-              return;
-            }
-          } else if (
-            href.startsWith("http://") ||
-            href.startsWith("https://")
-          ) {
-            // Link externo
-            richText.push({
-              type: "text",
-              text: {
-                content: text,
-                link: { url: href },
-              },
-              annotations,
-            });
-            return;
-          } else {
-            // Outro tipo de link
-            richText.push({
-              type: "text",
-              text: {
-                content: text,
-              },
-              annotations,
-            });
-            return;
-          }
-        }
-      }
-      richText.push({
-        type: "text",
-        text: {
-          content: text,
-        },
-        annotations,
-      });
-    }
-  }
-
+  const promises = [];
   $("body")
     .contents()
     .each((_, node) => {
-      processNode(node);
+      if (node.type === "text") {
+        const content = node.data;
+        if (content.trim() === "") return;
+        promises.push(processTextWithLinks(content, fileDir, parentPageId));
+      } else if (node.type === "tag") {
+        let annotations = {};
+        let text = "";
+        $(node)
+          .contents()
+          .each((_, child) => {
+            if (child.type === "text") {
+              text += child.data;
+            } else if (child.type === "tag") {
+              text += $(child).text();
+            }
+          });
+        if (text.trim() === "") return;
+        // Não processa links markdown dentro de tags, só aplica anotações
+        switch (node.name) {
+          case "strong":
+          case "b":
+            annotations.bold = true;
+            break;
+          case "em":
+          case "i":
+            annotations.italic = true;
+            break;
+          case "u":
+            annotations.underline = true;
+            break;
+          case "s":
+          case "del":
+            annotations.strikethrough = true;
+            break;
+          case "code":
+            annotations.code = true;
+            break;
+        }
+        richText.push({
+          type: "text",
+          text: {
+            content: text,
+          },
+          annotations,
+        });
+      }
     });
+
+  const results = await Promise.all(promises);
+  results.forEach(({ richText: r, blocks: b }) => {
+    if (r.length > 0) richText = richText.concat(r);
+    if (b.length > 0) blocks.push(...b);
+  });
 
   if (blocks.length > 0) {
     // Se houver blocos link_to_page, retornar todos (um para cada link)
@@ -219,29 +229,25 @@ function paragraphToNotionBlock(token, fileDir = "") {
   };
 }
 
-// Converter um token do tipo list para um bloco de lista do Notion
-function listToNotionBlocks(token) {
+// Converter um token do tipo lista para blocos de lista do Notion
+async function listToNotionBlocks(token, fileDir = "", parentPageId) {
   const blocks = [];
   const listType = token.ordered ? "numbered_list_item" : "bulleted_list_item";
 
-  token.items.forEach((item) => {
+  for (const item of token.items) {
     const $ = cheerio.load(item.text);
-    const richText = [];
-
+    let richText = [];
+    const promises = [];
     $("body")
       .contents()
       .each((_, node) => {
         if (node.type === "text") {
-          richText.push({
-            type: "text",
-            text: {
-              content: node.data,
-            },
-          });
+          const content = node.data;
+          if (content.trim() === "") return;
+          promises.push(processTextWithLinks(content, fileDir, parentPageId));
         } else if (node.type === "tag") {
           let annotations = {};
           const text = $(node).text();
-
           switch (node.name) {
             case "strong":
             case "b":
@@ -255,7 +261,6 @@ function listToNotionBlocks(token) {
               annotations.code = true;
               break;
           }
-
           richText.push({
             type: "text",
             text: {
@@ -265,7 +270,11 @@ function listToNotionBlocks(token) {
           });
         }
       });
-
+    const results = await Promise.all(promises);
+    results.forEach(({ richText: r, blocks: b }) => {
+      if (r.length > 0) richText = richText.concat(r);
+      if (b.length > 0) blocks.push(...b);
+    });
     blocks.push({
       object: "block",
       type: listType,
@@ -276,9 +285,108 @@ function listToNotionBlocks(token) {
             : [{ type: "text", text: { content: "" } }],
       },
     });
-  });
-
+  }
   return blocks;
+}
+
+// Converter um token do tipo blockquote para um bloco de citação do Notion
+async function blockquoteToNotionBlock(token, fileDir = "", parentPageId) {
+  const $ = cheerio.load(token.text);
+  let richText = [];
+  const blocks = [];
+  const promises = [];
+  $("body")
+    .contents()
+    .each((_, node) => {
+      if (node.type === "text") {
+        const content = node.data;
+        if (content.trim() === "") return;
+        promises.push(processTextWithLinks(content, fileDir, parentPageId));
+      }
+    });
+  const results = await Promise.all(promises);
+  results.forEach(({ richText: r, blocks: b }) => {
+    if (r.length > 0) richText = richText.concat(r);
+    if (b.length > 0) blocks.push(...b);
+  });
+  if (blocks.length > 0) {
+    return blocks.concat([
+      {
+        object: "block",
+        type: "quote",
+        quote: {
+          rich_text:
+            richText.length > 0
+              ? richText
+              : [{ type: "text", text: { content: "" } }],
+        },
+      },
+    ]);
+  }
+  return {
+    object: "block",
+    type: "quote",
+    quote: {
+      rich_text:
+        richText.length > 0
+          ? richText
+          : [{ type: "text", text: { content: "" } }],
+    },
+  };
+}
+
+// Converter um token do tipo tabela para um bloco de tabela do Notion
+async function tableToNotionBlock(token, fileDir = "", parentPageId) {
+  const rows = [];
+  // Função utilitária para extrair texto puro de uma célula
+  async function processCell(cell) {
+    let content = "";
+    if (typeof cell === "string") content = cell;
+    else if (cell && typeof cell === "object") {
+      if (cell.text) content = cell.text;
+      else if (cell.raw) content = cell.raw;
+      else if (cell.tokens && Array.isArray(cell.tokens)) {
+        content = cell.tokens.map((t) => t.raw || t.text || "").join("");
+      }
+    } else content = String(cell);
+    const { richText } = await processTextWithLinks(
+      content,
+      fileDir,
+      parentPageId
+    );
+    return richText;
+  }
+  // Adicionar cabeçalho
+  if (token.header && token.header.length > 0) {
+    const headerCells = await Promise.all(
+      token.header.map((cell) => processCell(cell))
+    );
+    rows.push(headerCells);
+  }
+  // Adicionar linhas
+  for (const row of token.rows) {
+    const cells = await Promise.all(row.map((cell) => processCell(cell)));
+    rows.push(cells);
+  }
+  return {
+    object: "block",
+    type: "table",
+    table: {
+      table_width: token.header
+        ? token.header.length
+        : token.rows[0]
+        ? token.rows[0].length
+        : 1,
+      has_column_header: token.header && token.header.length > 0,
+      has_row_header: false,
+      children: rows.map((row) => ({
+        type: "table_row",
+        table_row: {
+          cells: row,
+        },
+      })),
+    },
+  };
 }
 
 // Converter um token do tipo code para um bloco de código do Notion
@@ -305,100 +413,6 @@ function codeToNotionBlock(token) {
     });
   }
   return blocks.length === 1 ? blocks[0] : blocks;
-}
-
-// Converter um token do tipo blockquote para um bloco de citação do Notion
-function blockquoteToNotionBlock(token) {
-  const $ = cheerio.load(token.text);
-  const richText = [];
-
-  $("body")
-    .contents()
-    .each((_, node) => {
-      if (node.type === "text") {
-        richText.push({
-          type: "text",
-          text: {
-            content: node.data,
-          },
-        });
-      }
-    });
-
-  return {
-    object: "block",
-    type: "quote",
-    quote: {
-      rich_text:
-        richText.length > 0
-          ? richText
-          : [{ type: "text", text: { content: "" } }],
-    },
-  };
-}
-
-// Converter um token do tipo table para um bloco de tabela do Notion
-function tableToNotionBlock(token) {
-  const rows = [];
-
-  // Função utilitária para extrair texto puro de uma célula
-  function extractCellText(cell) {
-    if (typeof cell === "string") return cell;
-    if (cell && typeof cell === "object") {
-      if (cell.text) return cell.text;
-      if (cell.raw) return cell.raw;
-      if (cell.tokens && Array.isArray(cell.tokens)) {
-        return cell.tokens.map((t) => t.raw || t.text || "").join("");
-      }
-    }
-    return String(cell);
-  }
-
-  // Adicionar cabeçalho
-  if (token.header && token.header.length > 0) {
-    const headerCells = token.header.map((cell) => [
-      {
-        type: "text",
-        text: {
-          content: extractCellText(cell),
-        },
-      },
-    ]);
-    rows.push(headerCells);
-  }
-
-  // Adicionar linhas
-  token.rows.forEach((row) => {
-    const cells = row.map((cell) => [
-      {
-        type: "text",
-        text: {
-          content: extractCellText(cell),
-        },
-      },
-    ]);
-    rows.push(cells);
-  });
-
-  return {
-    object: "block",
-    type: "table",
-    table: {
-      table_width: token.header
-        ? token.header.length
-        : token.rows[0]
-        ? token.rows[0].length
-        : 1,
-      has_column_header: token.header && token.header.length > 0,
-      has_row_header: false,
-      children: rows.map((row) => ({
-        type: "table_row",
-        table_row: {
-          cells: row,
-        },
-      })),
-    },
-  };
 }
 
 // Converter um token do tipo hr para um bloco de separador do Notion
@@ -490,7 +504,7 @@ function filterValidBlocks(blocks) {
 }
 
 // Função principal para converter Markdown em blocos do Notion
-function markdownToNotionBlocks(markdown, fileDir = "", rootDir = "") {
+async function markdownToNotionBlocks(markdown, dirName, parentPageId) {
   const { frontmatter, content } = extractFrontmatter(markdown);
   const blocks = [];
 
@@ -511,7 +525,6 @@ function markdownToNotionBlocks(markdown, fileDir = "", rootDir = "") {
         language: "yaml",
       },
     });
-
     // Adicionar um separador após o frontmatter
     blocks.push({
       object: "block",
@@ -519,11 +532,9 @@ function markdownToNotionBlocks(markdown, fileDir = "", rootDir = "") {
       divider: {},
     });
   }
-
   // Processar diagramas Mermaid se configurado
   if (config.renderMermaidDiagrams && containsMermaidDiagram(content)) {
     const diagrams = extractMermaidDiagram(content);
-
     diagrams.forEach((diagram) => {
       // Dividir diagrama em blocos de até 2000 caracteres
       const maxLen = 2000;
@@ -546,31 +557,29 @@ function markdownToNotionBlocks(markdown, fileDir = "", rootDir = "") {
       }
     });
   }
-
   // Tokenizar o Markdown
   const tokens = marked.lexer(content);
-
   // Converter tokens em blocos do Notion
-  tokens.forEach((token, idx) => {
+  for (const [idx, token] of tokens.entries()) {
     let block = undefined;
     switch (token.type) {
       case "heading":
         block = headingToNotionBlock(token);
         break;
       case "paragraph":
-        block = paragraphToNotionBlock(token, fileDir, rootDir);
+        block = await paragraphToNotionBlock(token, dirName, parentPageId);
         break;
       case "list":
-        block = listToNotionBlocks(token);
+        block = await listToNotionBlocks(token, dirName, parentPageId);
         break;
       case "code":
         block = codeToNotionBlock(token);
         break;
       case "blockquote":
-        block = blockquoteToNotionBlock(token);
+        block = await blockquoteToNotionBlock(token, dirName, parentPageId);
         break;
       case "table":
-        block = tableToNotionBlock(token);
+        block = await tableToNotionBlock(token, dirName, parentPageId);
         break;
       case "hr":
         block = hrToNotionBlock();
@@ -597,18 +606,18 @@ function markdownToNotionBlocks(markdown, fileDir = "", rootDir = "") {
     } else if (block) {
       blocks.push(block);
     }
-  });
-
+  }
   // Filtrar blocos inválidos antes de retornar (recursivo)
   const validBlocks = filterValidBlocks(blocks);
   return { blocks: validBlocks, frontmatter };
 }
 
 // Função para processar um arquivo Markdown
-function processMarkdownFile(filePath, fileDir = "") {
+async function processMarkdownFile(filePath, parentPageId) {
+  const dirName = path.dirname(filePath);
   try {
     const content = fs.readFileSync(filePath, "utf8");
-    return markdownToNotionBlocks(content, fileDir, "");
+    return await markdownToNotionBlocks(content, dirName, parentPageId);
   } catch (error) {
     console.error(
       `Erro ao processar arquivo Markdown ${filePath}:`,

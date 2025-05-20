@@ -57,9 +57,10 @@ async function ensureDirectChildPages(markdown, fileDir, parentPageId) {
 }
 
 // Função para processar um arquivo README.md
-async function processReadmeFile(filePath, parentPageId, pageName) {
+async function processReadmeFile(filePath, parentPageId) {
   try {
-    const { blocks } = processMarkdownFile(filePath, path.dirname(filePath));
+    const pageName = path.dirname(filePath);
+    const { blocks } = await processMarkdownFile(filePath, parentPageId);
 
     // Se já existe uma página para este diretório
     if (pageIdMap.has(pageName)) {
@@ -96,9 +97,10 @@ async function processMarkdownFileToNotion(filePath, parentPageId) {
       const pageInfo = pageIdMap.get(filePath);
       // Se foi criada como referência (vazia), popular com o conteúdo
       if (pageInfo.isReference) {
-        const { blocks } = processMarkdownFile(
+        const { blocks } = await processMarkdownFile(
           filePath,
-          path.dirname(filePath)
+          path.dirname(filePath),
+          parentPageId
         );
         const validBlocks = blocks.filter((b) => b && typeof b === "object");
         // Adicionar blocos em lotes de até 100
@@ -127,7 +129,11 @@ async function processMarkdownFileToNotion(filePath, parentPageId) {
       parentPageId
     );
 
-    const { blocks } = processMarkdownFile(filePath, path.dirname(filePath));
+    const { blocks } = await processMarkdownFile(
+      filePath,
+      path.dirname(filePath),
+      parentPageId
+    );
     // Filtrar blocos inválidos
     const validBlocks = blocks.filter((b) => b && typeof b === "object");
     // Logar blocos para debug
@@ -185,9 +191,7 @@ async function processDirectory(dirPath) {
 
     // 1. Analisar README e criar páginas para filhos diretos referenciados
     if (readmePath) {
-      const rawContent = fs.readFileSync(readmePath, "utf8");
-      await ensureDirectChildPages(rawContent, dirPath, infoDir.id);
-      await processReadmeFile(readmePath, infoDir.id, dirName);
+      await processReadmeFile(readmePath, infoDir.id);
     }
 
     // 4. Listar subdiretórios e processar recursivamente
