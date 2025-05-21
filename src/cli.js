@@ -1,5 +1,6 @@
+#!/usr/bin/env node
 require("dotenv").config();
-const { processFiles } = require("./src/index");
+const { processFiles } = require("./index");
 const path = require("path");
 const os = require("os");
 
@@ -22,12 +23,12 @@ async function runImport() {
     }
     if (!notionPageId) {
       console.error("Erro: ID da página do Notion não fornecido!");
-      console.error("Uso: node example.js <notionPageId> <docsPath>");
+      console.error("Uso: notion-md-import <notionPageId> <docsPath>");
       process.exit(1);
     }
     if (!docsPathRaw) {
       console.error("Erro: Caminho dos arquivos não fornecido!");
-      console.error("Uso: node example.js <notionPageId> <docsPath>");
+      console.error("Uso: notion-md-import <notionPageId> <docsPath>");
       process.exit(1);
     }
 

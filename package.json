@@ -1,20 +1,39 @@
 {
     "name": "notion-md-import",
     "version": "1.0.0",
-    "description": "Serviço para transformar arquivos Markdown em páginas do Notion",
-    "main": "src/index.js",
-    "scripts": {
-        "start": "node src/index.js",
-        "dev": "nodemon src/index.js",
-        "import": "node scripts/import.js"
-    },
+    "description": "Transforme arquivos Markdown em páginas do Notion com links internos resolvidos automaticamente.",
+    "main": "src/markdown-processor.js",
+    "types": "src/markdown-processor.d.ts",
+    "files": [
+        "src/",
+        "README.md"
+    ],
     "keywords": [
         "notion",
         "markdown",
-        "documentation"
+        "documentation",
+        "import",
+        "converter"
     ],
-    "author": "",
+    "author": "Guilherme Irgang <484gui@gmail.com>",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/484Irgang/notion-md-import.git"
+    },
+    "bugs": {
+        "url": "https://github.com/484Irgang/notion-md-import/issues"
+    },
+    "homepage": "https://github.com/484Irgang/notion-md-import#readme",
+    "engines": {
+        "node": ">=18"
+    },
+    "scripts": {
+        "start": "node src/index.js",
+        "dev": "nodemon src/index.js",
+        "import": "node scripts/import.js",
+        "link-global": "npm link"
+    },
     "dependencies": {
         "@notionhq/client": "^2.2.13",
         "@tryfabric/martian": "^1.2.4",
@@ -39,5 +58,8 @@
         "eslint": "^9.27.0",
         "globals": "^16.1.0",
         "nodemon": "^3.0.1"
+    },
+    "bin": {
+        "notion-md-import": "src/cli.js"
     }
 }
