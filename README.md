@@ -13,11 +13,37 @@ npm install
 npm run link-global
 ```
 
-Adicione a env `NOTION_API_KEY` com a API KEY que o Notion libera para a integração em um arquivo `.env`
+## Configuração da variável NOTION_API_KEY
+
+Para que o comando CLI funcione em qualquer lugar, adicione sua chave de API do Notion como uma variável de ambiente global no seu sistema:
+
+1. Descubra qual shell você está usando (ex: zsh, bash).
+2. Abra o arquivo de configuração do shell (ex: `~/.zshrc` ou `~/.bashrc`):
+
+   ```sh
+   nano ~/.zshrc
+   # ou
+   nano ~/.bashrc
+   ```
+
+3. Adicione a seguinte linha ao final do arquivo, substituindo pela sua chave:
+
+   ```sh
+   export NOTION_API_KEY=sua_chave_api_aqui
+   ```
+
+4. Salve e feche o arquivo. Depois, recarregue o shell:
+
+   ```sh
+   source ~/.zshrc
+   # ou
+   source ~/.bashrc
+   ```
+
+Agora, ao rodar o comando `notion-md-import` em qualquer lugar, a variável estará disponível automaticamente!
+
 **Importante**
 O script só terá possibilidade de adicionar as páginas e os conteúdos dos arquivos se houver permissão para acessar essa página via integração, mais informações em [Adicionar e gerenciar integração](https://www.notion.com/pt/help/add-and-manage-connections-with-the-api#add-connections-to-pages)
-
-Agora você pode rodar o comando de qualquer lugar:
 
 ```sh
 notion-md-import <notionPageId> <docsPath>
