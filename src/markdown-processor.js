@@ -53,8 +53,7 @@ function normalizeBlockPageLinks(fileDir, parentPageId) {
           return rt;
         const linkPath = rt.text.link.url;
         const baseDir = returnBaseDir(fileDir, linkPath);
-        console.log(`baseDir: ${baseDir}`);
-        if (!baseDir) return rt;
+        if (!baseDir) return { ...rt, text: { ...rt.text, link: undefined } };
         if (!pageIdMap.has(baseDir)) {
           const page = await createPage(parentPageId, baseDir);
           pageIdMap.set(baseDir, { id: page.id, isReference: true });
