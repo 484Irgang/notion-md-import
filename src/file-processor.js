@@ -16,50 +16,66 @@ function shouldProcessFile(filePath) {
   return config.allowedExtensions.includes(ext);
 }
 
-// Função utilitária para verificar se um link é filho direto do diretório atual
-function isDirectChildLink(currentDir, linkPath) {
-  const resolved = path.resolve(currentDir, linkPath);
-  const rel = path.relative(currentDir, resolved);
-  if (rel.startsWith("..")) return false; // está fora do diretório
-  const parts = rel.split(path.sep);
-  return (
-    parts.length === 1 ||
-    (parts.length === 2 && parts[1].toLowerCase() === "readme.md")
-  );
-}
+// function returnBaseDir(currentDir, linkPath) {
+//   const resolved = path.resolve(currentDir, linkPath);
+//   const rel = path.relative(currentDir, resolved);
+//   if (rel.startsWith("..")) return null; // está fora do diretório
+//   const parts = rel.split(path.sep);
+//   return parts.length === 1
+//     ? path.basename(rel)
+//     : parts.length === 2 && parts[1].toLowerCase() === "readme.md"
+//     ? path.basename(path.dirname(rel))
+//     : null;
+// }
+
+// function isDirectChildLink(currentDir, linkPath) {
+//   const resolved = path.resolve(currentDir, linkPath);
+//   const rel = path.relative(currentDir, resolved);
+//   if (rel.startsWith("..")) return false; // está fora do diretório
+//   const parts = rel.split(path.sep);
+//   return (
+//     parts.length === 1 ||
+//     (parts.length === 2 && parts[1].toLowerCase() === "readme.md")
+//   );
+// }
 
 // Função utilitária para garantir que todas as páginas referenciadas por links internos já existem (apenas filhos diretos)
-const linkRegex = /^\[([^\]]+)\]\((\.?\/?[^)]+\.md)\)/g;
+// const linkRegex = /^\[([^\]]+)\]\((\.?\/?[^)]+\.md)\)/g;
 
-async function ensureDirectChildPages(markdown, fileDir, parentPageId) {
-  let match;
-  let found = false;
-  while ((match = linkRegex.exec(markdown)) !== null) {
-    const nome = match[1];
-    const href = match[2];
-    found = true;
-    if (isDirectChildLink(fileDir, href)) {
-      const resolved = path.resolve(fileDir, href);
-      if (!pageIdMap.has(resolved)) {
-        const page = await createPage(parentPageId, nome);
-        pageIdMap.set(resolved, { id: page.id, isReference: true });
-        console.log(
-          `[DEBUG] Página criada para filho direto: ${nome} (${resolved})`
-        );
-      }
-    }
-  }
-  if (!found) {
-    console.log(
-      "[DEBUG] Nenhum link interno do tipo [Nome](./arquivo.md) encontrado neste arquivo."
-    );
-  }
-}
+// async function ensureDirectChildPages(markdown, fileDir, parentPageId) {
+//   let match;
+//   let found = false;
+//   while ((match = linkRegex.exec(markdown)) !== null) {
+//     const nome = match[1];
+//     const href = match[2];
+//     found = true;
+//     if (isDirectChildLink(fileDir, href)) {
+//       const resolved = path.resolve(fileDir, href);
+//       if (!pageIdMap.has(resolved)) {
+//         const page = await createPage(parentPageId, nome);
+//         pageIdMap.set(resolved, { id: page.id, isReference: true });
+//         console.log(
+//           `[DEBUG] Página criada para filho direto: ${nome} (${resolved})`
+//         );
+//       }
+//     }
+//   }
+//   if (!found) {
+//     console.log(
+//       "[DEBUG] Nenhum link interno do tipo [Nome](./arquivo.md) encontrado neste arquivo."
+//     );
+//   }
+// }
 
 // Função para processar um arquivo README.md
-async function processReadmeFile(filePath, parentPageId, pageName) {
+async function processMarkdownReadme(filePath, parentPageId, pageName) {
   try {
-    const { blocks } = await processMarkdownFile(filePath, parentPageId);
+    const blocks = await processMarkdownFile(filePath, parentPageId);
+    // // DEBUG: Exibir estrutura dos blocos que irão para o Notion
+    // console.log(
+    //   "[DEBUG] Estrutura dos blocos para Notion:",
+    //   JSON.stringify(blocks, null, 2)
+    // );
 
     // Se já existe uma página para este diretório
     if (pageIdMap.has(pageName)) {
@@ -105,80 +121,47 @@ async function processReadmeFile(filePath, parentPageId, pageName) {
   }
 }
 
-// Função para processar um arquivo Markdown normal
 async function processMarkdownFileToNotion(filePath, parentPageId) {
   try {
     const fileName = path.basename(filePath, path.extname(filePath));
 
-    // Se já existe uma página para este arquivo
-    if (pageIdMap.has(filePath)) {
-      const pageInfo = pageIdMap.get(filePath);
-      // Se foi criada como referência (vazia), popular com o conteúdo
-      if (pageInfo.isReference) {
-        const { blocks } = await processMarkdownFile(
-          filePath,
-          path.dirname(filePath),
-          parentPageId
-        );
-        const validBlocks = blocks.filter((b) => b && typeof b === "object");
-        // Adicionar blocos em lotes de até 100
-        let i = 0;
-        while (i < validBlocks.length) {
-          const batch = validBlocks.slice(i, i + 100);
-          await appendBlocks(pageInfo.id, batch);
-          i += 100;
-        }
-        pageIdMap.set(filePath, { id: pageInfo.id, isReference: false });
-        console.log(
-          `Página de referência populada: ${fileName} (ID: ${pageInfo.id})`
-        );
-        return pageInfo.id;
-      } else {
+    if (pageIdMap.has(fileName)) {
+      const pageInfo = pageIdMap.get(fileName);
+      if (!pageInfo.isReference) {
         console.log(`Página já existe para: ${fileName}`);
         return pageInfo.id;
       }
+      const blocks = await processMarkdownFile(filePath, parentPageId);
+      // Adicionar blocos em lotes de até 100
+      let i = 0;
+      while (i < blocks.length) {
+        const batch = blocks.slice(i, i + 100);
+        await appendBlocks(pageInfo.id, batch);
+        i += 100;
+      }
+      pageIdMap.set(fileName, { id: pageInfo.id, isReference: false });
+      console.log(
+        `Página de referência populada: ${fileName} (ID: ${pageInfo.id})`
+      );
+      return pageInfo.id;
     }
 
-    // Pré-processar: garantir que todas as páginas referenciadas por links internos já existem
-    const rawContent = fs.readFileSync(filePath, "utf8");
-    await ensureDirectChildPages(
-      rawContent,
-      path.dirname(filePath),
-      parentPageId
-    );
-
-    const { blocks } = await processMarkdownFile(
+    const blocks = await processMarkdownFile(
       filePath,
       path.dirname(filePath),
       parentPageId
     );
-    // Filtrar blocos inválidos
-    const validBlocks = blocks.filter((b) => b && typeof b === "object");
-    // Logar blocos para debug
-    validBlocks.forEach((b, idx) => {
-      if (!b || typeof b !== "object") {
-        console.warn(
-          `[DEBUG] Bloco inválido em ${fileName} na posição ${idx}:`,
-          b
-        );
-      }
-      if (idx === 35) {
-        console.warn(
-          `[DEBUG] Bloco na posição 35 em ${fileName}:`,
-          JSON.stringify(b, null, 2)
-        );
-      }
-    });
+
     // Dividir os blocos em lotes de até 100
-    const firstBatch = validBlocks.slice(0, 100);
+    const firstBatch = blocks.slice(0, 100);
     const page = await createPage(parentPageId, fileName, firstBatch);
     pageIdMap.set(filePath, { id: page.id, isReference: false });
     console.log(`Página criada para: ${fileName} (ID: ${page.id})`);
 
     // Adicionar blocos restantes, se houver
     let i = 100;
-    while (i < validBlocks.length) {
-      const batch = validBlocks.slice(i, i + 100);
+    while (i < blocks.length) {
+      const batch = blocks.slice(i, i + 100);
       await appendBlocks(page.id, batch);
       i += 100;
     }
@@ -209,7 +192,7 @@ async function processDirectory(dirPath) {
 
     // 1. Analisar README e criar páginas para filhos diretos referenciados
     if (readmePath) {
-      await processReadmeFile(readmePath, infoDir.id, dirName);
+      await processMarkdownReadme(readmePath, infoDir.id, dirName);
     }
 
     // 4. Listar subdiretórios e processar recursivamente
@@ -217,6 +200,7 @@ async function processDirectory(dirPath) {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const entryPath = path.join(dirPath, entry.name);
+        pageIdMap.set(entry.name, { id: infoDir.id, isReference: true });
         await processDirectory(entryPath, infoDir.id);
       }
     }
@@ -265,6 +249,4 @@ async function processFiles(rootPath, rootPageId) {
 module.exports = {
   processFiles,
   processDirectory,
-  processMarkdownFileToNotion,
-  processReadmeFile,
 };

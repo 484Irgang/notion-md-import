@@ -666,12 +666,18 @@ function normalizeBlockPageLinks(fileDir, parentPageId) {
           pageIdMap.set(baseDir, { id: page.id, isReference: true });
         }
         const pageInfo = pageIdMap.get(baseDir);
+        // Atualiza apenas a URL do link para apontar para a página criada
         return {
-          object: "block",
-          type: "link_to_page",
-          link_to_page: {
-            type: "page_id",
-            page_id: pageInfo.id,
+          ...rt,
+          text: {
+            ...rt.text,
+            link: {
+              ...rt.text.link,
+              url: `https://www.notion.so/${baseDir}-${pageInfo.id.replace(
+                /-/g,
+                ""
+              )}`,
+            },
           },
         };
       })) || [];
@@ -683,8 +689,26 @@ function normalizeBlockPageLinks(fileDir, parentPageId) {
       );
     }
 
-    return await Promise.all(newRichTextArr);
+    return {
+      ...block,
+      [richTextType]: { rich_text: await Promise.all(newRichTextArr) },
+    };
   };
+}
+
+// Função para garantir que todos os blocos de código tenham language definido
+function ensureCodeBlockLanguage(blocks) {
+  for (const block of blocks) {
+    if (block.type === "code" && block.code) {
+      if (!block.code.language) {
+        block.code.language = "plain text";
+      }
+    }
+    if (block.children && Array.isArray(block.children)) {
+      ensureCodeBlockLanguage(block.children);
+    }
+  }
+  return blocks;
 }
 
 // Função principal para processar markdown e tratar links internos
@@ -692,9 +716,15 @@ async function processMarkdownFile(filePath, parentPageId) {
   try {
     const content = fs.readFileSync(filePath, "utf8");
     const blocks = markdownToBlocks(content);
-    return await Promise.all(
-      blocks.map(normalizeBlockPageLinks(filePath, parentPageId))
-    );
+    // Processamento sequencial dos blocos para evitar concorrência
+    const resultBlocks = [];
+    for (const block of blocks) {
+      resultBlocks.push(
+        await normalizeBlockPageLinks(filePath, parentPageId)(block)
+      );
+    }
+    // Garante que todos os blocos de código tenham language definido
+    return ensureCodeBlockLanguage(resultBlocks);
   } catch (error) {
     console.error(
       `Erro ao processar arquivo Markdown ${filePath}:`,
