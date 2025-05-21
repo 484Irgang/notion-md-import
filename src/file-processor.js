@@ -16,66 +16,10 @@ function shouldProcessFile(filePath) {
   return config.allowedExtensions.includes(ext);
 }
 
-// function returnBaseDir(currentDir, linkPath) {
-//   const resolved = path.resolve(currentDir, linkPath);
-//   const rel = path.relative(currentDir, resolved);
-//   if (rel.startsWith("..")) return null; // está fora do diretório
-//   const parts = rel.split(path.sep);
-//   return parts.length === 1
-//     ? path.basename(rel)
-//     : parts.length === 2 && parts[1].toLowerCase() === "readme.md"
-//     ? path.basename(path.dirname(rel))
-//     : null;
-// }
-
-// function isDirectChildLink(currentDir, linkPath) {
-//   const resolved = path.resolve(currentDir, linkPath);
-//   const rel = path.relative(currentDir, resolved);
-//   if (rel.startsWith("..")) return false; // está fora do diretório
-//   const parts = rel.split(path.sep);
-//   return (
-//     parts.length === 1 ||
-//     (parts.length === 2 && parts[1].toLowerCase() === "readme.md")
-//   );
-// }
-
-// Função utilitária para garantir que todas as páginas referenciadas por links internos já existem (apenas filhos diretos)
-// const linkRegex = /^\[([^\]]+)\]\((\.?\/?[^)]+\.md)\)/g;
-
-// async function ensureDirectChildPages(markdown, fileDir, parentPageId) {
-//   let match;
-//   let found = false;
-//   while ((match = linkRegex.exec(markdown)) !== null) {
-//     const nome = match[1];
-//     const href = match[2];
-//     found = true;
-//     if (isDirectChildLink(fileDir, href)) {
-//       const resolved = path.resolve(fileDir, href);
-//       if (!pageIdMap.has(resolved)) {
-//         const page = await createPage(parentPageId, nome);
-//         pageIdMap.set(resolved, { id: page.id, isReference: true });
-//         console.log(
-//           `[DEBUG] Página criada para filho direto: ${nome} (${resolved})`
-//         );
-//       }
-//     }
-//   }
-//   if (!found) {
-//     console.log(
-//       "[DEBUG] Nenhum link interno do tipo [Nome](./arquivo.md) encontrado neste arquivo."
-//     );
-//   }
-// }
-
 // Função para processar um arquivo README.md
 async function processMarkdownReadme(filePath, parentPageId, pageName) {
   try {
     const blocks = await processMarkdownFile(filePath, parentPageId);
-    // // DEBUG: Exibir estrutura dos blocos que irão para o Notion
-    // console.log(
-    //   "[DEBUG] Estrutura dos blocos para Notion:",
-    //   JSON.stringify(blocks, null, 2)
-    // );
 
     // Se já existe uma página para este diretório
     if (pageIdMap.has(pageName)) {
