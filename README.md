@@ -54,3 +54,31 @@ Pull requests são bem-vindos! Abra uma issue para discutir mudanças.
 ## Licença
 
 MIT
+
+## Pasta `ia-rules` (Plus)
+
+A pasta `ia-rules` é um adicional opcional do projeto, onde você pode colocar templates de regras e exemplos para agentes de IA.
+
+Esses templates servem como referência para que agentes de IA (como GPT, Copilot, etc) possam gerar documentações em Markdown de forma mais dinâmica, estruturada e padronizada, facilitando a importação para o Notion.
+
+**Vantagens:**
+
+- Garante que a documentação gerada siga um padrão de qualidade e estrutura.
+- Ajuda a criar páginas no Notion de forma mais coerente, concisa e fácil de navegar.
+- Permite customizar regras para diferentes tipos de projetos, times ou domínios.
+
+**Como usar:**
+
+- Crie arquivos Markdown ou YAML dentro da pasta `ia-rules` com instruções, exemplos e padrões desejados.
+- Compartilhe esses templates com sua equipe ou com agentes de IA para gerar documentação mais alinhada com as necessidades do seu projeto.
+
+Exemplo de uso:
+
+```
+/ia-rules
+  ├── regra-arquitetura.md
+  ├── regra-api.md
+  └── exemplo-template.yaml
+```
+
+Esses arquivos não são obrigatórios para o funcionamento da ferramenta, mas são um "plus" para quem deseja automatizar e padronizar ainda mais a geração de documentação técnica!
