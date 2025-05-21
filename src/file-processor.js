@@ -178,6 +178,7 @@ async function processDirectory(dirPath) {
   try {
     const dirName = path.basename(dirPath);
     const infoDir = pageIdMap.get(dirName);
+    console.log(`Processando diretório: ${dirName} = ${dirName}`);
     if (!infoDir?.id)
       throw new Error(
         `Diretório não encontrado entre páginas criadas: ${dirPath}`
@@ -200,7 +201,6 @@ async function processDirectory(dirPath) {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const entryPath = path.join(dirPath, entry.name);
-        pageIdMap.set(entry.name, { id: infoDir.id, isReference: true });
         await processDirectory(entryPath, infoDir.id);
       }
     }
