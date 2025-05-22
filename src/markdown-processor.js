@@ -10,9 +10,10 @@ function setPageIdMap(map) {
 
 function returnBaseDir(currentDir, linkPath) {
   const resolved = path.resolve(currentDir, linkPath);
+  console.log("[DEBUG] resolved:", resolved);
   if (!fs.existsSync(resolved)) return null;
   const rel = path.relative(currentDir, resolved);
-  if (rel.startsWith("..")) return null; // está fora do diretório
+  if (rel.startsWith("..")) return null;
   const parts = rel.split(path.sep);
   return parts.length === 1
     ? path.basename(rel, path.extname(rel))
@@ -101,7 +102,10 @@ async function processMarkdownFile(filePath, parentPageId) {
     const resultBlocks = [];
     for (const block of blocks) {
       resultBlocks.push(
-        await normalizeBlockPageLinks(filePath, parentPageId)(block)
+        await normalizeBlockPageLinks(
+          path.dirname(filePath),
+          parentPageId
+        )(block)
       );
     }
     return resultBlocks;

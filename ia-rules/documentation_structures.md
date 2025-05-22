@@ -33,9 +33,9 @@ docs/
 
 ### Metadata Header
 
-Every document must begin with a YAML metadata header enclosed in triple dashes (`---`):
+Every document must begin with a YAML metadata header inside a code block marked as `yml`, and the YAML content itself must be enclosed within triple dashes (`---`):
 
-```markdown
+```yml
 ---
 title: [Descriptive Title of the Document]
 description: [Brief description of the document's content and purpose]
@@ -130,7 +130,7 @@ Example:
 ```typescript
 // Example of a WebSocket connection manager
 export class ConnectionManager {
-  private socket: WebSocket | null = null
+  private socket: WebSocket | null = null;
 
   constructor(private url: string) {
     // Initialize the connection manager
@@ -138,7 +138,7 @@ export class ConnectionManager {
 
   // Connect to the WebSocket server
   async connect(): Promise<void> {
-    this.socket = new WebSocket(this.url)
+    this.socket = new WebSocket(this.url);
     // Setup event handlers
   }
 }
@@ -349,13 +349,13 @@ export class MessageHandler {
 
   async handleMessage(userId: string, data: any): Promise<void> {
     // Validate message data
-    this.validateMessage(data)
+    this.validateMessage(data);
 
     // Process message
-    const result = await this.processMessage(userId, data)
+    const result = await this.processMessage(userId, data);
 
     // Notify clients
-    this.notifyClients(result)
+    this.notifyClients(result);
   }
 }
 ```
