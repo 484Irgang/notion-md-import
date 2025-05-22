@@ -10,6 +10,7 @@ function setPageIdMap(map) {
 
 function returnBaseDir(currentDir, linkPath) {
   const resolved = path.resolve(currentDir, linkPath);
+  if (!fs.existsSync(resolved)) return null;
   const rel = path.relative(currentDir, resolved);
   if (rel.startsWith("..")) return null; // está fora do diretório
   const parts = rel.split(path.sep);
@@ -43,7 +44,7 @@ function normalizeBlockPageLinks(fileDir, parentPageId) {
     const richTextArr = block?.[richTextType]?.rich_text;
     if (!richTextArr) return block;
 
-    const newRichTextArr =
+    const richTextPromises =
       (await richTextArr?.map(async (rt) => {
         if (
           rt.type !== "text" ||
@@ -82,26 +83,13 @@ function normalizeBlockPageLinks(fileDir, parentPageId) {
       );
     }
 
+    const rich_text = await Promise.all(richTextPromises);
+
     return {
       ...block,
-      [richTextType]: { rich_text: await Promise.all(newRichTextArr) },
+      [richTextType]: { ...block[richTextType], rich_text },
     };
   };
-}
-
-// Função para garantir que todos os blocos de código tenham language definido
-function ensureCodeBlockLanguage(blocks) {
-  for (const block of blocks) {
-    if (block.type === "code" && block.code) {
-      if (!block.code.language) {
-        block.code.language = "plain text";
-      }
-    }
-    if (block.children && Array.isArray(block.children)) {
-      ensureCodeBlockLanguage(block.children);
-    }
-  }
-  return blocks;
 }
 
 // Função principal para processar markdown e tratar links internos
@@ -116,8 +104,7 @@ async function processMarkdownFile(filePath, parentPageId) {
         await normalizeBlockPageLinks(filePath, parentPageId)(block)
       );
     }
-    // Garante que todos os blocos de código tenham language definido
-    return ensureCodeBlockLanguage(resultBlocks);
+    return resultBlocks;
   } catch (error) {
     console.error(
       `Erro ao processar arquivo Markdown ${filePath}:`,
